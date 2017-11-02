@@ -1,0 +1,87 @@
+/* Author: Viebakanda Dutta */
+
+#include <ros/ros.h>
+#include <sensor_msgs/image_encodings.h>
+#include <image_transport/image_transport.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include "filter.h"
+
+Filter::Filter()
+{
+ 
+  ros::NodeHandle nh;
+  ros::NodeHandle np ("~");
+  nh.getParam("threshold",user_threshold);
+  
+  // If threshold value greater than limit, make it zero 
+  if(user_threshold > 255)
+    user_threshold = 0;
+   
+  image_transport::ImageTransport it(nh);
+  image_transport::ImageTransport it_nh(np);
+  // Filtered image publisher
+  subImage = it.subscribe("/camera/rgb/image_raw", 1, &Filter::ImageCallback, this);
+  filtered_image_pub = it_nh.advertise("/camera/image_raw_filtered", 10);
+  cv::namedWindow("view");
+}
+
+Filter::~Filter()
+{
+ cv::namedWindow("view");
+}
+
+void Filter::ImageCallback(const sensor_msgs::ImageConstPtr& original_image)
+{
+  // Format original image
+  cv_ptr = cv_bridge::toCvCopy(original_image, sensor_msgs::image_encodings::MONO8);
+    
+  // OpenCV to MAT structure
+  I = cv_ptr->image;
+
+  // Gaussian Blur sharpen filter
+  cv::GaussianBlur(I, I_filtered, cv::Size(0,0),2);
+  
+  // Weights
+  cv::addWeighted(I, 2.5, I_filtered, -1.5, 0, I_filtered);
+  
+  // Equalize histogram
+  cv::equalizeHist(I_filtered,I_filtered);
+
+  // Treshold
+  cv::threshold(I_filtered,I_filtered,user_threshold,0,3);
+
+  // Creating filtered image_raw and publishing
+  cv_bridge::CvImagePtr in_msg;
+  in_msg = cv_ptr;
+  cv_bridge::CvImage out_msg;
+   
+  // Timestamp and tf frame same as input image
+  out_msg.header=in_msg->header;
+  
+  // Format image
+  out_msg.encoding=sensor_msgs::image_encodings::MONO8;
+  out_msg.image=I_filtered;
+
+  // Publishing
+  filtered_image_pub.publish(out_msg.toImageMsg());  
+
+   cv::imshow("view", I_filtered);
+   cv::waitKey(3);
+}
+
+
+int main(int argc, char **argv)
+{
+  ros::init(argc, argv, "image_filtering_for_aruco");
+  ros::NodeHandle nh;
+
+   // Filter object
+  Filter filt;
+
+  ros::spin();
+
+  return 0;
+
+}
+
